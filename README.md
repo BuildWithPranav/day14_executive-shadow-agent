@@ -1,197 +1,185 @@
-# Executive Shadow Agent
+# 🕴️ Executive Shadow Agent
 
-FastAPI starter repo for an **Executive Shadow** agent that watches inbound Slack and email traffic, learns your communication patterns from prior messages and internal docs, drafts responses, and requires a one-click approval before anything is sent.
+> **A production-grade AI agent that drafts replies to your Slack and Email messages in your own voice — grounded in your knowledge base, triaged by urgency, and held for your approval before anything sends.**
 
-## What this ships
+---
 
-- Async FastAPI backend
-- SQLite-backed knowledge capture and draft queue
-- Full-text retrieval over policies, product docs, and sent messages
-- Heuristic drafting backend for zero-key local development
-- OpenAI drafting backend for higher-quality ghost drafts
-- Slack preview connector
-- SMTP send connector for approved email sends
-- Inline dashboard with approve / reject actions
-- Docker-ready layout
+## 📸 Overview
 
-## Architecture
+Founders and execs drown in repetitive Slack threads and emails. This agent watches inbound messages, retrieves relevant context from your knowledge base and past sent messages, drafts a reply that sounds like you, classifies urgency, and queues it for one-click approval. You stay in control — nothing sends without your sign-off.
 
-1. **Knowledge Capture**
-   - Ingest policy docs, FAQs, and prior sent messages.
-   - Store them in SQLite + FTS5.
-2. **Triage**
-   - Receive inbound Slack or email events.
-   - Retrieve matching context and classify urgency.
-3. **Ghost Draft**
-   - Generate a draft reply using internal docs plus style exemplars.
-   - Save it in the dashboard and optionally mirror a Slack preview.
-4. **1-Click Send**
-   - Approve from the dashboard.
-   - Slack replies post to thread.
-   - Email replies send over SMTP.
+---
 
-## Repo layout
+## 🏗️ Architecture
 
-```text
+```
+┌─────────────────────────────────────────────────────────────┐
+│            Slack Events API · Email Webhook (inbound)        │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                    ShadowService                             │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  1. Ingest — store incoming message + thread context  │   │
+│  └──────────────────────┬───────────────────────────────┘   │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐   │
+│  │  2. Retrieve — pull relevant knowledge base docs +    │   │
+│  │     style-matched historical sent messages            │   │
+│  └──────────────────────┬───────────────────────────────┘   │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐   │
+│  │  3. Shadow Model — LLM (or heuristic fallback) drafts │   │
+│  │     AgentDecision: urgency, intent, draft reply,      │   │
+│  │     confidence, reasoning                              │   │
+│  └──────────────────────┬───────────────────────────────┘   │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐   │
+│  │  4. Approval Queue — dashboard shows pending drafts   │   │
+│  │     pending → approved/rejected → sent                │   │
+│  └──────────────────────┬───────────────────────────────┘   │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐   │
+│  │  5. Dispatch — SlackConnector / EmailConnector sends  │   │
+│  │     the approved reply on your behalf                 │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🤖 How It Works
+
+1. **Connect channels** — Slack Events API and/or inbound email webhook feed the agent
+2. **Build your knowledge base** — ingest policies, FAQs, product docs (`source_type`, `title`, `content`, `tags`)
+3. **Teach it your voice** — ingest historical sent messages so the drafter mirrors your tone
+4. **Message arrives** → agent retrieves relevant knowledge + style examples → drafts a reply
+5. **Triage** — every draft is classified: urgency (`low`/`normal`/`high`/`critical`) and intent (pricing, support, delivery planning, etc.)
+6. **You review** in the dashboard — approve, reject, or edit
+7. **On approval** — the agent sends the reply via Slack or Email automatically
+
+Falls back to a deterministic `HeuristicShadowModel` with zero API key required — useful for local dev and testing the pipeline end-to-end.
+
+---
+
+## 📁 Folder Structure
+
+```
 executive-shadow-agent/
 ├── app/
-│   ├── api.py
-│   ├── config.py
-│   ├── db.py
-│   ├── llm.py
-│   ├── logging.py
-│   ├── models.py
-│   ├── repositories.py
-│   ├── schemas.py
-│   ├── security.py
-│   ├── seed.py
-│   ├── service.py
+│   ├── service.py            # ShadowService — core orchestration
+│   ├── llm.py                 # BaseShadowModel: LLM + Heuristic fallback
+│   ├── repositories.py        # SQLite persistence (knowledge, messages, drafts)
+│   ├── schemas.py              # Pydantic models (AgentDecision, DraftDetailResponse, etc.)
+│   ├── models.py               # Domain models
 │   ├── connectors/
-│   │   ├── email.py
-│   │   └── slack.py
-│   └── ui/
-│       └── dashboard.html
-├── data/
+│   │   ├── slack.py            # Slack Events API + send
+│   │   └── email.py            # Email inbound + send
+│   ├── ui/dashboard.html       # Approval queue dashboard
+│   ├── api.py                  # FastAPI routes
+│   ├── security.py             # Webhook signature verification
+│   ├── seed.py                  # Demo data seeding
+│   ├── db.py                    # SQLite setup
+│   └── config.py                # Settings
 ├── .env.example
 ├── Dockerfile
-├── pyproject.toml
-└── README.md
+└── pyproject.toml
 ```
 
-## Quick start
+---
 
-### 1) Install
+## ⚡ Quick Start
 
+### 1. Clone & Configure
 ```bash
-uv sync
-```
-
-### 2) Configure env
-
-```bash
+git clone <repo-url>
+cd executive-shadow-agent
 cp .env.example .env
+# Add OPENAI_API_KEY, SLACK_BOT_TOKEN, EMAIL credentials
 ```
 
-Minimum local-dev setup:
-
-- `ADMIN_TOKEN=change-me`
-- `LLM_BACKEND=heuristic`
-- `DRY_RUN_SENDS=true`
-
-For OpenAI drafts:
-
-- `LLM_BACKEND=openai`
-- `OPENAI_API_KEY=...`
-
-For real sends:
-
-- set SMTP credentials
-- set `DRY_RUN_SENDS=false`
-
-### 3) Seed sample knowledge
-
+### 2. Install & Run
 ```bash
-uv run shadow-seed
+pip install -e .
+uvicorn app.main:app --reload
 ```
 
-### 4) Start the API
-
+### 3. Seed Demo Data
 ```bash
-uv run shadow-api
+python -m app.seed
 ```
 
-Open:
-
-- Health: `http://127.0.0.1:8000/health`
-- Dashboard: `http://127.0.0.1:8000/dashboard`
-
-## API examples
-
-### Ingest knowledge
-
+### 4. Run with Docker
 ```bash
-curl -X POST http://127.0.0.1:8000/ingest/knowledge \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: change-me" \
-  -d '{
-    "source_type": "policy",
-    "title": "Escalation Policy",
-    "content": "Refunds above $5,000 require CFO approval.",
-    "tags": ["finance", "refund"]
-  }'
+docker build -t executive-shadow-agent .
+docker run -p 8000:8000 --env-file .env executive-shadow-agent
 ```
 
-### Ingest past sent message
+Open dashboard: http://localhost:8000/ui/dashboard.html
 
-```bash
-curl -X POST http://127.0.0.1:8000/ingest/sent-message \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: change-me" \
-  -d '{
-    "channel": "email",
-    "sender": "ceo@company.com",
-    "recipient": "client@acme.com",
-    "subject": "Re: Launch timeline",
-    "body": "Thanks for the note. Here is the cleanest path forward..."
-  }'
+---
+
+## 📡 API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/knowledge` | Ingest a knowledge base document |
+| `POST` | `/sent-messages` | Ingest a historical sent message (style learning) |
+| `POST` | `/webhook/slack` | Inbound Slack event → generates draft |
+| `POST` | `/webhook/email` | Inbound email event → generates draft |
+| `GET` | `/drafts` | List pending/approved/rejected drafts |
+| `GET` | `/drafts/{id}` | Get a specific draft |
+| `POST` | `/drafts/{id}/approve` | Approve → dispatch the reply |
+| `POST` | `/drafts/{id}/reject` | Reject a draft |
+| `GET` | `/health` | Health check |
+
+### AgentDecision Output
+```json
+{
+  "urgency": "high",
+  "intent": "pricing",
+  "draft_reply": "Hey Raj — thanks for following up! Our Pro plan is...",
+  "confidence": 0.87,
+  "reasoning": "Sender asked a direct pricing question with an EOD deadline."
+}
 ```
 
-### Trigger a Slack draft
+---
 
-```bash
-curl -X POST http://127.0.0.1:8000/events/slack \
-  -H "Content-Type: application/json" \
-  -d '{
-    "channel_id": "C123456",
-    "channel_name": "client-success",
-    "user_id": "U234567",
-    "user_name": "sarah",
-    "text": "Urgent: client wants to know if we can move launch up by 2 weeks.",
-    "ts": "1712345678.000100",
-    "thread_ts": "1712345678.000100"
-  }'
-```
+## ⚙️ Configuration
 
-### Trigger an email draft
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | LLM drafting backend (optional — falls back to heuristic) |
+| `SLACK_BOT_TOKEN` | Slack send permission |
+| `SLACK_SIGNING_SECRET` | Webhook signature verification |
+| `EMAIL_PROVIDER` | SMTP / SendGrid |
+| `DATABASE_PATH` | SQLite file path |
 
-```bash
-curl -X POST http://127.0.0.1:8000/events/email \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message_id": "msg-001",
-    "from_address": "client@acme.com",
-    "to_address": "ceo@company.com",
-    "subject": "Need revised pricing today",
-    "body": "Can you confirm if enterprise pricing includes premium onboarding?"
-  }'
-```
+---
 
-### Approve and send
+## 🚀 Scaling Path
 
-```bash
-curl -X POST http://127.0.0.1:8000/drafts/1/approve \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: change-me" \
-  -d '{"actor": "founder", "note": "Looks good"}'
-```
+| Stage | Upgrade |
+|-------|---------|
+| **Now** | SQLite + single user |
+| **Founder/exec** | Multi-channel (Slack + Email + WhatsApp), mobile approval app |
+| **Team** | Multi-user shadow profiles, per-person voice learning |
+| **Enterprise** | Auto-approve low-risk replies, escalation routing, audit trail |
 
-## Security notes
+---
 
-- The dashboard requires `X-Admin-Token` for draft listing and approval actions.
-- Slack request verification is supported when `SLACK_SIGNING_SECRET` is configured.
-- Generic inbound email providers can use `X-Event-Secret` when `INBOUND_EVENT_SECRET` is set.
-- Keep `DRY_RUN_SENDS=true` until you've validated outbound routing.
+## 📦 Built With
 
-## Production upgrades
+- **FastAPI** — REST API + webhooks
+- **LLM (with heuristic fallback)** — Drafting + urgency/intent triage
+- **SQLite** — Knowledge base + message + draft storage
+- **Slack Events API** — Inbound/outbound Slack integration
+- **Email (SMTP/SendGrid)** — Inbound/outbound email integration
+- **Tenacity** — Retry with exponential backoff
+- **structlog** — Structured logging
 
-1. Replace SQLite with Postgres + pgvector.
-2. Add Gmail or Microsoft Graph draft creation.
-3. Add SSO and per-user approval policies.
-4. Add Redis queues for bursty traffic.
-5. Add OpenTelemetry tracing and audit logs.
+---
 
-## Zip output
-
-A GitHub-ready zip is generated in this workspace as:
-
-- `executive-shadow-agent.zip`
+*Day 14/27 — Built by Pranav | IIT Kharagpur · AI Automation Agency*
