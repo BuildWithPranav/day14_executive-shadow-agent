@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Executive Shadow Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #0b1020; color: #e5e7eb; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+    input, select, button, textarea { border-radius: 8px; border: 1px solid #334155; background: #111827; color: #e5e7eb; padding: 10px 12px; }
+    button { cursor: pointer; }
+    .primary { background: #2563eb; }
+    .danger { background: #b91c1c; }
+    .muted { color: #94a3b8; font-size: 14px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    pre { white-space: pre-wrap; background: #0f172a; padding: 12px; border-radius: 10px; }
+    .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #1d4ed8; font-size: 12px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Executive Shadow Dashboard</h1>
+    <p class="muted">Review ghost drafts, approve with one click, or reject for manual rewrite.</p>
+
+    <div class="row">
+      <input id="token" type="password" placeholder="X-Admin-Token" style="min-width:260px">
+      <select id="status">
+        <option value="pending">pending</option>
+        <option value="sent">sent</option>
+        <option value="rejected">rejected</option>
+      </select>
+      <button class="primary" onclick="loadDrafts()">Refresh drafts</button>
+    </div>
+
+    <div id="message" class="muted"></div>
+    <div id="drafts"></div>
+  </div>
+
+  <script>
+    function headers() {
+      return {
+        'Content-Type': 'application/json',
+        'X-Admin-Token': document.getElementById('token').value
+      };
+    }
+
+    function setMessage(text) {
+      document.getElementById('message').textContent = text;
+    }
+
+    async function loadDrafts() {
+      const status = document.getElementById('status').value;
+      setMessage('Loading drafts...');
+      const response = await fetch(`/drafts?status=${encodeURIComponent(status)}`, { headers: headers() });
+      if (!response.ok) {
+        setMessage(`Failed to load drafts: ${response.status}`);
+        return;
+      }
+      const drafts = await response.json();
+      const container = document.getElementById('drafts');
+      container.innerHTML = '';
+      if (!drafts.length) {
+        container.innerHTML = '<div class="card">No drafts in this state.</div>';
+        setMessage('');
+        return;
+      }
+
+      for (const draft of drafts) {
+        const detailResponse = await fetch(`/drafts/${draft.id}`, { headers: headers() });
+        if (!detailResponse.ok) continue;
+        const detail = await detailResponse.json();
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const contextHtml = detail.retrieved_context.map(item => `
+          <li><strong>${escapeHtml(item.title)}</strong> <span class="muted">(${escapeHtml(item.source)})</span><br>${escapeHtml(item.content.slice(0, 220))}</li>
+        `).join('');
+
+        card.innerHTML = `
+          <div class="row">
+            <span class="pill">${escapeHtml(draft.channel)}</span>
+            <span class="pill">${escapeHtml(draft.urgency)}</span>
+            <span class="muted">confidence ${Number(draft.confidence).toFixed(2)}</span>
+          </div>
+          <div class="grid">
+            <div>
+              <h3>Inbound</h3>
+              <div class="muted">From: ${escapeHtml(detail.incoming_message.sender)}</div>
+              <div class="muted">Subject: ${escapeHtml(detail.incoming_message.subject || '(slack message)')}</div>
+              <pre>${escapeHtml(detail.incoming_message.body)}</pre>
+            </div>
+            <div>
+              <h3>Draft</h3>
+              <div class="muted">Subject: ${escapeHtml(draft.subject || '(none)')}</div>
+              <pre>${escapeHtml(draft.body)}</pre>
+            </div>
+          </div>
+          <p><strong>Rationale:</strong> ${escapeHtml(draft.rationale)}</p>
+          <p><strong>Preview location:</strong> ${escapeHtml(draft.preview_location || 'dashboard only')}</p>
+          <details>
+            <summary>Retrieved context</summary>
+            <ul>${contextHtml || '<li>No retrieved context.</li>'}</ul>
+          </details>
+          <div class="row">
+            <button class="primary" onclick="approveDraft(${draft.id})">Approve + send</button>
+            <button class="danger" onclick="rejectDraft(${draft.id})">Reject</button>
+          </div>
+        `;
+        container.appendChild(card);
+      }
+      setMessage('');
+    }
+
+    async function approveDraft(id) {
+      const actor = prompt('Approved by?','founder') || 'founder';
+      const note = prompt('Optional note','Looks good') || '';
+      const response = await fetch(`/drafts/${id}/approve`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ actor, note })
+      });
+      if (!response.ok) {
+        const error = await response.text();
+        setMessage(`Approve failed: ${error}`);
+        return;
+      }
+      setMessage(`Draft ${id} sent.`);
+      await loadDrafts();
+    }
+
+    async function rejectDraft(id) {
+      const actor = prompt('Rejected by?','founder') || 'founder';
+      const note = prompt('Why reject?','Needs rewrite') || 'Needs rewrite';
+      const response = await fetch(`/drafts/${id}/reject`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ actor, note })
+      });
+      if (!response.ok) {
+        const error = await response.text();
+        setMessage(`Reject failed: ${error}`);
+        return;
+      }
+      setMessage(`Draft ${id} rejected.`);
+      await loadDrafts();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+  </script>
+</body>
+</html>

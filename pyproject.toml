@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "executive-shadow-agent"
+version = "0.1.0"
+description = "FastAPI-based Executive Shadow agent that learns tone, drafts replies, and gates sends behind one-click approval."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Arena.ai Agent Mode" }]
+dependencies = [
+  "aiosmtplib>=3.0.2",
+  "aiosqlite>=0.20.0",
+  "fastapi>=0.116.0",
+  "httpx>=0.28.1",
+  "orjson>=3.10.18",
+  "pydantic>=2.11.7",
+  "pydantic-settings>=2.10.1",
+  "structlog>=25.4.0",
+  "tenacity>=9.1.2",
+  "uvicorn[standard]>=0.35.0"
+]
+
+[project.scripts]
+shadow-api = "app.main:run"
+shadow-seed = "app.seed:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
